@@ -168,7 +168,7 @@ canvas {
 </div>
 
 <div class="keys-hint">
-  <kbd>←</kbd><kbd>→</kbd> 移动 &nbsp; <kbd>空格</kbd> 射击 &nbsp; <kbd>P</kbd> 暂停 &nbsp; <kbd>R</kbd> 重启 &nbsp; <kbd>B</kbd> 炸弹
+  <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> 移动 &nbsp; <kbd>空格</kbd> 射击 &nbsp; <kbd>P</kbd> 暂停 &nbsp; <kbd>R</kbd> 重启 &nbsp; <kbd>B</kbd> 炸弹 &nbsp; <kbd>W</kbd> 切换武器
 </div>
 
 <script>
@@ -277,6 +277,10 @@ class Game {
       h: PLAYER_H,
       shootTimer: 0,
       shootInterval: 250,
+      // 武器系统
+      weaponLevel: 0,  // 0=基础, 1=双发, 2=三向, 3=穿透
+      weaponTimer: 0,
+      weaponDuration: 12000, // 每种武器持续12秒
     };
 
     this.bullets = [];
@@ -324,8 +328,8 @@ class Game {
   // ========== 道具 ==========
   spawnPowerup(x, y) {
     if (Math.random() > 0.3) return; // 30%掉率
-    const types = ['hp', 'spread', 'shield', 'bomb'];
-    const weights = [30, 30, 20, 20];
+    const types = ['hp', 'spread', 'shield', 'bomb', 'weapon'];
+    const weights = [25, 20, 15, 15, 25];
     let total = weights.reduce((a,b)=>a+b, 0);
     let r = Math.random() * total;
     let type = types[0];
@@ -359,8 +363,18 @@ class Game {
         this.addFloatingText(this.player.x, this.player.y - 20, '💥炸弹!', '#ffaa00');
         this.detonateBomb();
         break;
+      case 'weapon':
+        this.upgradeWeapon();
+        break;
     }
     updateHud();
+  }
+
+  upgradeWeapon() {
+    this.player.weaponLevel = (this.player.weaponLevel + 1) % 4;
+    this.player.weaponTimer = this.player.weaponDuration;
+    const names = ['🔫 基础弹', '🔫🔫 双发', '🔱 三向弹', '💎 穿透弹'];
+    this.addFloatingText(this.player.x, this.player.y - 30, names[this.player.weaponLevel], '#ff44ff');
   }
 
   detonateBomb() {
@@ -450,6 +464,12 @@ class Game {
       if (this.spreadTimer <= 0) { this.spreadShot = false; this.spreadTimer = 0; }
     }
 
+    // === 武器计时 ===
+    if (this.player.weaponLevel > 0 && this.player.weaponTimer > 0) {
+      this.player.weaponTimer -= dt;
+      if (this.player.weaponTimer <= 0) { this.player.weaponLevel = 0; this.player.weaponTimer = 0; }
+    }
+
     // === 玩家射击 ===
     this.player.shootTimer += dt;
     if (this.player.shootTimer >= this.player.shootInterval) {
@@ -458,20 +478,53 @@ class Game {
       const py = this.player.y - this.player.h/2;
 
       if (this.spreadShot) {
-        // 散射：3发
+        // 散射：3发（旧道具，兼容）
         for (let i = -1; i <= 1; i++) {
           this.bullets.push({
             x: px - BULLET_W/2 + i*4, y: py - BULLET_H,
             w: BULLET_W, h: BULLET_H,
-            speed: 8, vx: i * 0.5, vy: -8,
+            speed: 8, vx: i * 0.5, vy: -8, pierce: false, damage: 1,
           });
         }
       } else {
-        this.bullets.push({
-          x: px - BULLET_W/2, y: py - BULLET_H,
-          w: BULLET_W, h: BULLET_H,
-          speed: 8, vx: 0, vy: -8,
-        });
+        // 武器系统
+        switch (this.player.weaponLevel) {
+          case 0: // 基础单发
+            this.bullets.push({
+              x: px - BULLET_W/2, y: py - BULLET_H,
+              w: BULLET_W, h: BULLET_H,
+              speed: 8, vx: 0, vy: -8, pierce: false, damage: 1,
+            });
+            break;
+          case 1: // 双发
+            this.bullets.push({
+              x: px - BULLET_W - 2, y: py - BULLET_H,
+              w: BULLET_W, h: BULLET_H,
+              speed: 8, vx: -0.3, vy: -8, pierce: false, damage: 1,
+            });
+            this.bullets.push({
+              x: px + 2, y: py - BULLET_H,
+              w: BULLET_W, h: BULLET_H,
+              speed: 8, vx: 0.3, vy: -8, pierce: false, damage: 1,
+            });
+            break;
+          case 2: // 三向弹
+            for (let i = -1; i <= 1; i++) {
+              this.bullets.push({
+                x: px - BULLET_W/2 + i*5, y: py - BULLET_H,
+                w: BULLET_W, h: BULLET_H,
+                speed: 7, vx: i * 1.0, vy: -7, pierce: false, damage: 1,
+              });
+            }
+            break;
+          case 3: // 穿透弹（大颗，可穿透敌人）
+            this.bullets.push({
+              x: px - BULLET_W, y: py - BULLET_H - 4,
+              w: BULLET_W * 2, h: BULLET_H * 2,
+              speed: 10, vx: 0, vy: -10, pierce: true, damage: 2,
+            });
+            break;
+        }
       }
     }
 
@@ -488,7 +541,7 @@ class Game {
       for (let j = this.enemies.length - 1; j >= 0; j--) {
         const e = this.enemies[j];
         if (rectCollide(b, e)) {
-          e.hp--;
+          e.hp -= (b.damage || 1);
           if (e.hp <= 0) {
             const pts = e.type === 'tank' ? 30 : 10;
             this.score += pts;
@@ -502,12 +555,12 @@ class Game {
             comboEl.textContent = `🔥 COMBO x${this.combo}`;
             if (this.combo >= 5) {
               this.addFloatingText(e.x, e.y - 10, `🔥x${this.combo}`, '#ffaa00');
-              // 连击加分
               this.score += Math.floor(this.combo / 5) * 5;
             }
             this.enemies.splice(j, 1);
           }
-          hit = true;
+          // 穿透弹不消失
+          if (!b.pierce) { hit = true; break; }
           break;
         }
       }
@@ -696,10 +749,12 @@ class Game {
     bossHpFill.style.width = (b.hp / b.maxHp * 100) + '%';
   }
 
-  movePlayer(dx) {
+  movePlayer(dx, dy = 0) {
     if (!this.started || this.gameOver || this.paused) return;
     this.player.x += dx;
+    this.player.y += dy;
     this.player.x = Math.max(this.player.w/2, Math.min(W - this.player.w/2, this.player.x));
+    this.player.y = Math.max(this.player.h/2 + 10, Math.min(H - this.player.h/2 - 10, this.player.y));
   }
 
   togglePause() {
@@ -761,13 +816,17 @@ function draw(game) {
 
   // 子弹
   for (const b of game.bullets) {
-    const isSpread = b.vx !== 0 && b.vx !== undefined;
-    ctx.fillStyle = isSpread ? '#44ffaa' : '#00ffff';
-    ctx.shadowColor = isSpread ? '#44ffaa' : '#00ffff';
+    let color = '#00ffff';
+    let trail = 'rgba(0,255,255,0.3)';
+    if (b.pierce) { color = '#ffdd00'; trail = 'rgba(255,221,0,0.3)'; }
+    else if (b.vx !== undefined && Math.abs(b.vx) > 0.8) { color = '#ff44ff'; trail = 'rgba(255,68,255,0.3)'; }
+    else if (b.vx !== undefined && Math.abs(b.vx) > 0.2) { color = '#44ffaa'; trail = 'rgba(68,255,170,0.3)'; }
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
     ctx.shadowBlur = 10;
     ctx.fillRect(b.x, b.y, b.w, b.h);
     // 尾迹
-    ctx.fillStyle = isSpread ? 'rgba(68,255,170,0.3)' : 'rgba(0,255,255,0.3)';
+    ctx.fillStyle = trail;
     ctx.fillRect(b.x, b.y + b.h, b.w, 5);
     ctx.shadowBlur = 0;
   }
@@ -1022,19 +1081,25 @@ function drawPowerup(p) {
 function updateHud() {
   scoreEl.textContent = game.score;
   let hpStr = '';
-  // 红心
   for (let i = 0; i < game.hp; i++) hpStr += '❤';
-  // 护盾
   for (let i = 0; i < game.shieldHp; i++) hpStr += '💠';
-  // 空
   for (let i = game.hp + game.shieldHp; i < game.maxHp; i++) hpStr += '🖤';
   hpEl.textContent = hpStr || '💀';
   bestEl.textContent = getBest();
+
+  // 武器指示
+  const weaponIcons = ['🔫', '🔫🔫', '🔱', '💎'];
+  const weaponColors = ['#00ffff', '#44ffaa', '#ff44ff', '#ffdd00'];
+  const wl = game.player.weaponLevel;
+  comboEl.textContent = weaponIcons[wl] || '🔫';
+  comboEl.style.color = weaponColors[wl] || '#ffaa00';
+  comboEl.classList.add('show');
 }
 
 // ==================== 触摸控制 ====================
 let touchId = null;
 let lastTouchX = null;
+let lastTouchY = null;
 let touchStartX = null;
 
 canvas.addEventListener('touchstart', e => {
@@ -1045,6 +1110,7 @@ canvas.addEventListener('touchstart', e => {
   const t = e.changedTouches[0];
   touchId = t.identifier;
   lastTouchX = t.clientX;
+  lastTouchY = t.clientY;
   touchStartX = t.clientX;
 });
 
@@ -1059,8 +1125,10 @@ canvas.addEventListener('touchmove', e => {
   const rect = canvas.getBoundingClientRect();
   const scale = rect.width / W;
   const dx = (t.clientX - lastTouchX) / scale;
-  game.movePlayer(dx);
+  const dy = (t.clientY - lastTouchY) / scale;
+  game.movePlayer(dx, dy);
   lastTouchX = t.clientX;
+  lastTouchY = t.clientY;
 });
 
 canvas.addEventListener('touchend', e => {
@@ -1078,21 +1146,25 @@ canvas.addEventListener('mousedown', e => {
   if (!game.started || game.gameOver) return;
   if (game.paused) { game.togglePause(); return; }
   mouseDown = true;
-  // 记录初始位置
   const rect = canvas.getBoundingClientRect();
   const scale = rect.width / W;
   mouseLastX = (e.clientX - rect.left) / scale;
+  mouseLastY = (e.clientY - rect.top) / scale;
 });
 
 let mouseLastX = 0;
+let mouseLastY = 0;
 canvas.addEventListener('mousemove', e => {
   if (!mouseDown || !game.started || game.gameOver || game.paused) return;
   const rect = canvas.getBoundingClientRect();
   const scale = rect.width / W;
   const gameX = (e.clientX - rect.left) / scale;
+  const gameY = (e.clientY - rect.top) / scale;
   const dx = gameX - mouseLastX;
-  game.movePlayer(dx);
+  const dy = gameY - mouseLastY;
+  game.movePlayer(dx, dy);
   mouseLastX = gameX;
+  mouseLastY = gameY;
 });
 
 canvas.addEventListener('mouseup', () => { mouseDown = false; });
@@ -1109,7 +1181,10 @@ document.addEventListener('keydown', e => {
     case 'r': case 'R': game.start(); break;
     case 'Escape': game.togglePause(); break;
     case 'b': case 'B':
-      // 手动使用炸弹（如果有存货——目前只有拾取）
+      game.detonateBomb();
+      break;
+    case 'w': case 'W':
+      game.upgradeWeapon();
       break;
   }
 });
@@ -1118,8 +1193,10 @@ document.addEventListener('keyup', e => { keys[e.key] = false; });
 function updateKeyboard(dt) {
   if (!game.started || game.gameOver || game.paused) return;
   const speed = 0.3;
-  if (keys['ArrowLeft']) game.movePlayer(-speed * dt);
-  if (keys['ArrowRight']) game.movePlayer(speed * dt);
+  if (keys['ArrowLeft']) game.movePlayer(-speed * dt, 0);
+  if (keys['ArrowRight']) game.movePlayer(speed * dt, 0);
+  if (keys['ArrowUp']) game.movePlayer(0, -speed * dt);
+  if (keys['ArrowDown']) game.movePlayer(0, speed * dt);
 }
 
 // ==================== 手机振动检测 ====================
