@@ -288,6 +288,8 @@ class Game {
 
     this.explosions = [];
     this.floatingTexts = [];
+    this.flashWhite = 0;
+    this.damageFlash = 0;
 
     // Boss
     this.boss = null;
@@ -372,6 +374,26 @@ class Game {
     this.enemyBullets = [];
     // 全屏闪白
     this.flashWhite = 15;
+  }
+
+  // ========== 爆炸 ==========
+  addExplosion(x, y, count = 12) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1 + Math.random() * 3;
+      this.explosions.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 25 + Math.random() * 15,
+        size: 2 + Math.random() * 4,
+        color: ['#ff6633','#ffaa00','#ffff44','#ff4433','#ffffff'][Math.floor(Math.random()*5)],
+      });
+    }
+    this.explosions.push({
+      x, y, vx: 0, vy: 0, life: 15, size: 1,
+      shockwave: true, maxSize: 30 + count * 2,
+    });
   }
 
   // ========== 浮字 ==========
@@ -621,6 +643,57 @@ class Game {
     bestOverlay.textContent = `🏆 最高分: ${best}`;
     actionBtn.textContent = '再来一局';
     bossHpBar.classList.remove('show');
+  }
+
+  // ========== Boss相关 ==========
+  spawnBoss() {
+    const bossHp = 20 + Math.floor(this.score / 100) * 5;
+    this.boss = {
+      x: W / 2, y: -40,
+      w: 48, h: 40,
+      hp: bossHp, maxHp: bossHp,
+      speed: 0.5, dir: 1,
+      shootTimer: 0, shootInterval: 800,
+      phase: 0, pattern: 0,
+      patternTimer: 0, entered: false,
+    };
+    bossHpBar.classList.add('show');
+    this.addFloatingText(W/2, 60, '⚠️ BOSS 来袭! ⚠️', '#ff4444');
+  }
+
+  updateBoss(dt) {
+    if (!this.boss) return;
+    const b = this.boss;
+    if (!b.entered) {
+      b.y += 1.5 * dt / 16;
+      if (b.y >= 40) b.entered = true;
+      return;
+    }
+    b.x += b.speed * b.dir * dt / 16;
+    if (b.x > W - b.w/2 - 10) b.dir = -1;
+    if (b.x < b.w/2 + 10) b.dir = 1;
+    b.patternTimer += dt;
+    if (b.patternTimer > 3000) { b.patternTimer = 0; b.pattern = (b.pattern + 1) % 3; }
+    b.shootTimer += dt;
+    if (b.shootTimer >= b.shootInterval) {
+      b.shootTimer = 0;
+      const cx = b.x, cy = b.y + b.h/2;
+      if (b.pattern === 0) {
+        const angle = Math.atan2(this.player.y - cy, this.player.x - cx);
+        this.enemyBullets.push({ x: cx - ENEMY_BULLET_W/2, y: cy, w: 5, h: 10, speed: 3.5, vx: Math.cos(angle)*2, vy: Math.sin(angle)*2 });
+      } else if (b.pattern === 1) {
+        for (let i = -1; i <= 1; i++) {
+          const angle = Math.PI/2 + i * 0.3;
+          this.enemyBullets.push({ x: cx - 2, y: cy, w: 3, h: 8, speed: 3, vx: Math.cos(angle)*2.5, vy: Math.sin(angle)*2.5 });
+        }
+      } else {
+        for (let i = 0; i < 6; i++) {
+          const angle = Math.PI/2 + (i/6)*Math.PI*2 + (b.patternTimer/500);
+          this.enemyBullets.push({ x: cx - 1.5, y: cy, w: 3, h: 5, speed: 2.5, vx: Math.cos(angle)*2, vy: Math.sin(angle)*2 });
+        }
+      }
+    }
+    bossHpFill.style.width = (b.hp / b.maxHp * 100) + '%';
   }
 
   movePlayer(dx) {
